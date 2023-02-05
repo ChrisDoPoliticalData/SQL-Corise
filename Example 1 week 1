@@ -1,0 +1,73 @@
+with cities as (
+    select
+upper(trim(city_name)) as city, 
+upper(state_abbr) as state, 
+lat,
+long
+from resources.us_cities
+qualify row_number() over (partition by upper(city_name),upper(state_abbr) order by 1) = 1
+   )
+//SELECT * FROM cities
+
+,
+customers as (
+SELECT 
+    customer_id,
+    first_name as customer_first_name,
+    last_name as customer_last_name,
+    email as customer_email,
+    c2.customer_city,
+    c2.customer_state,
+    cities.lat as customer_lat,
+    cities.long as customer_long
+    from customers.customer_data as c1
+    inner join customers.customer_address as c2 using (customer_id)
+    inner join cities on (
+    upper(trim(c2.customer_city))= upper(cities.city)
+and upper(trim(c2.customer_state))= upper(cities.state)
+    )
+)
+//SELECT * from customers
+,
+supplies as (
+SELECT
+    supplier_id,
+    supplier_name,
+    upper(trim(supplier_city)) as supplier_city,
+    upper(supplier_state) as supplier_state,
+    c1.lat as supplier_lat,
+    c1.long as supplier_long
+    from suppliers.supplier_info as s1
+    left join resources.us_cities as c1 
+    on upper(s1.supplier_city) = c1.city_name
+    and upper(s1.supplier_state) = c1.state_abbr
+    
+)
+//SELECT * from supplies
+
+,final_join as (
+    SELECT
+        customer_id,
+        customer_first_name,
+        customer_last_name,
+        customer_email,
+        supplier_id,
+        supplier_name,
+        st_distance(st_makepoint(customers.customer_long, customers.customer_lat),
+                   st_makepoint(supplies.supplier_long, supplies.supplier_lat)) / 1609 as distance_in_miles,
+        row_number() over (partition by customer_id order by distance_in_miles) = 1 as row_num
+    from customers
+    cross join supplies
+    order by 3,2
+)
+select customer_id,
+        customer_first_name,
+        customer_last_name,
+        customer_email,
+        supplier_id,
+        supplier_name,
+        distance_in_miles
+        from final_join
+where row_num = 1
+
+//row_number() over (partition by upper(city_name))
