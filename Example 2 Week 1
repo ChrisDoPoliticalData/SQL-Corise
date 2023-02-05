@@ -1,0 +1,63 @@
+with tags as (
+SELECT c.customer_id, c.first_name, c.last_name, c.email,
+    trim(t.tag_property) as tag_customer,
+    row_number() over (partition by c.customer_id order by trim(t.tag_property)) as rank_tag
+    FROM customers.customer_data as c
+    --customers who completed the survey
+    inner join customers.customer_survey as s
+        on (s.customer_id = c.customer_id and IS_ACTIVE = true)
+    --which tags for which customers
+    inner join resources.recipe_tags as t
+        on (s.tag_id = t.tag_id)
+    --customer eligibility
+    inner join customers.customer_address as c2 
+        on (c2.customer_id = c.customer_id)
+    inner join resources.us_cities as u 
+        on (upper(trim(c2.customer_city))= upper(u.city_name)
+        and upper(trim(c2.customer_state))= upper(u.state_abbr))
+    qualify rank_tag <= 3
+)
+, preferences as (
+SELECT * from tags
+    PIVOT(max(tag_customer) for rank_tag in(1,2,3)) as pivot_values(
+    customer_id,
+    first_name,
+    last_name,
+    email,
+    pref1,
+    pref2,
+    pref3)
+    
+)
+//SELECT * from preferences
+
+
+
+
+,flatten_tags as (
+select 
+    recipe_id,
+    recipe_name,
+    trim(replace(flat_tag.value, '"', '')) as recipe_tag
+from vk_data.chefs.recipe
+, table(flatten(tag_list)) as flat_tag
+
+)
+, suggested_recipe as (
+SELECT 
+    customer_id,
+    any_value(flatten_tags.recipe_name) as recipe
+FROM tags
+    inner join flatten_tags on tags.tag_customer = flatten_tags.recipe_tag and tags.rank_tag=1
+    group by 1
+    
+)
+//SELECT * from suggested_recipes
+
+
+
+SELECT preferences.customer_id, first_name, last_name, email,
+pref1, pref2, pref3, suggested_recipe.recipe
+FROM preferences
+left join suggested_recipe on preferences.customer_id = suggested_recipe.customer_id
+order by email
