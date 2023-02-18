@@ -1,0 +1,53 @@
+--select * from VK_DATA.EVENTS.WEBSITE_ACTIVITY
+with events as (
+	select 
+    event_id,
+    session_id,
+    event_timestamp,
+    trim(parse_json(event_details):"recipe_id",'"') as recipe_id,
+    trim(parse_json(event_details):"event",'"') as event_type
+    from VK_DATA.EVENTS.WEBSITE_ACTIVITY
+    group by 1,2,3,4,5
+),
+avg_session as (
+	select
+    	session_id,
+        min(event_timestamp) as min_event_timestamp,
+        max(event_timestamp) as max_event_timestamp,
+        iff(count_if(event_type='view_recipe')=0,null,
+        	round(count_if(event_type='search')/count_if(event_type = 'view_recipe'))) as searches_per_recipe_view
+    from events
+    group by session_id
+            
+)
+--SELECT * from avg_session
+,
+most_viewed_recipe as (
+	select
+    	date(event_timestamp) as event_day,
+        recipe_id,
+        count(*) as total_views
+    from events
+    where recipe_id is not null
+    group by 1, 2
+    qualify row_number() over (partition by event_day order by total_views desc) = 1
+
+)
+--SELECT * from most_viewed_recipe
+,
+final as (
+	select
+    	date(min_event_timestamp) as event_day,
+        count(session_id) as total_sessions,
+        round(avg(datediff('sec',min_event_timestamp,max_event_timestamp))) as avg_session_lenth_sec,
+        max(searches_per_recipe_view) as avg_searches_per_recipe_view,
+        max(recipe_name) as favorite_recipe
+    from avg_session
+    inner join most_viewed_recipe on date(avg_session.min_event_timestamp) = most_viewed_recipe.event_day
+    inner join chefs.recipe using (recipe_id)
+    group by 1
+)
+
+
+select * from final
+order by 2
